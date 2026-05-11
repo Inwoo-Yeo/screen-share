@@ -77,7 +77,7 @@ joinAsHostBtn.addEventListener('click', () => joinSession(true));
 );
 
 function joinSession(asHost) {
-  if (peer) return; // 중복 실행 방지
+  if (peer) return;
 
   const sessionId = sessionIdInput.value.trim();
   const userName  = userNameInput.value.trim();
@@ -91,23 +91,16 @@ function joinSession(asHost) {
   myUserName  = userName;
   isHost      = asHost;
 
-  // 버튼 비활성화
+  // 버튼 → 로딩 스피너로 교체
   joinAsParticipantBtn.disabled    = true;
   joinAsHostBtn.disabled           = true;
-  joinAsParticipantBtn.textContent = '연결 중...';
-  joinAsHostBtn.textContent        = '연결 중...';
+  joinAsParticipantBtn.innerHTML   = '<span class="animate-spin inline-block mr-1">⏳</span> 연결 중...';
+  joinAsHostBtn.innerHTML          = '<span class="animate-spin inline-block mr-1">⏳</span> 연결 중...';
 
-  // ── Socket.IO 먼저 연결 ──
-  // Render(역방향 프록시) 환경: polling 먼저 시도 후 WebSocket 업그레이드
-  socket = io({
-    transports:       ['polling', 'websocket'],
-    reconnectionDelay: 1000,
-    timeout:           20000,
-  });
+  // ── Socket + PeerJS 동시 연결 ──
+  socket = io({ transports: ['polling', 'websocket'], reconnectionDelay: 1000, timeout: 20000 });
   setupSocketHandlers();
 
-  // ── PeerJS 연결 ──
-  // Render에서는 항상 443 포트 / secure: true
   peer = new Peer(undefined, {
     host:   location.hostname,
     port:   443,
@@ -115,11 +108,13 @@ function joinSession(asHost) {
     secure: true,
   });
 
-  // open 이벤트는 단 한 번만 처리
-  peer.once('open', (id) => {
-    myPeerId = id;
-    console.log('✅ PeerJS ID:', id);
+  // 둘 다 준비되면 join-session 전송
+  let socketConnected = false;
+  let peerConnected   = false;
 
+  function tryJoin() {
+    if (!socketConnected || !peerConnected) return;
+    console.log('🚀 join-session 전송');
     socket.emit('join-session', {
       sessionId,
       peerId:     myPeerId,
@@ -128,6 +123,19 @@ function joinSession(asHost) {
       numRooms:   asHost ? parseInt(numRoomsInput.value, 10)  || 9 : undefined,
       maxPerRoom: asHost ? parseInt(maxPerRoomInput.value, 10) || 4 : undefined,
     });
+  }
+
+  socket.once('connect', () => {
+    console.log('🟢 Socket 연결됨:', socket.id);
+    socketConnected = true;
+    tryJoin();
+  });
+
+  peer.once('open', (id) => {
+    myPeerId = id;
+    console.log('✅ PeerJS ID:', id);
+    peerConnected = true;
+    tryJoin();
   });
 
   peer.on('error', (err) => {
@@ -135,19 +143,14 @@ function joinSession(asHost) {
     alert('연결 오류: ' + (err.type || err.message));
     peer   = null;
     socket = null;
-    joinAsParticipantBtn.disabled    = false;
-    joinAsHostBtn.disabled           = false;
-    joinAsParticipantBtn.textContent = '참가자로 입장';
-    joinAsHostBtn.textContent        = '호스트로 입장';
+    joinAsParticipantBtn.disabled  = false;
+    joinAsHostBtn.disabled         = false;
+    joinAsParticipantBtn.innerHTML = '참가자로 입장';
+    joinAsHostBtn.innerHTML        = '호스트로 입장';
   });
 
-  // 들어오는 통화 처리 (같은 방 멤버만)
   peer.on('call', (call) => {
-    if (!knownPeers[call.peer]) {
-      console.log('알 수 없는 피어 통화 무시:', call.peer);
-      return;
-    }
-    console.log('📞 통화 수신:', call.peer);
+    if (!knownPeers[call.peer]) return;
     call.answer();
     incomingCalls[call.peer] = call;
     call.on('stream', (stream) => showRemoteVideo(call.peer, stream));
@@ -157,7 +160,6 @@ function joinSession(asHost) {
     });
   });
 }
-
 // ===== Socket 이벤트 =====
 function setupSocketHandlers() {
   socket.on('connect', () => {
