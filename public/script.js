@@ -109,6 +109,12 @@ function joinSession(asHost) {
       transports: ['websocket', 'polling'] // 연결 안정성을 위해 추가
   });
 
+
+    setupSocketHandlers(); 
+
+    socket.emit('join-session', {
+  
+    
     socket.emit('join-session', {
       sessionId,
       peerId: myPeerId,
