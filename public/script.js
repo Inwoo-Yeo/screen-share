@@ -90,11 +90,14 @@ function joinSession(asHost) {
   isHost = asHost;
 
   // PeerJS 연결
+  // public/script.js 수정
+
+// 기존 코드를 지우고 아래 내용으로 교체하세요
   peer = new Peer(undefined, {
-    host: window.location.hostname,
-    port: window.location.port || (window.location.protocol === 'https:' ? 443 : 80),
+    host: location.hostname,
+    port: location.protocol === 'https:' ? 443 : (location.port || 80),
     path: '/peerjs',
-    secure: window.location.protocol === 'https:',
+    secure: location.protocol === 'https:'
   });
 
   peer.on('open', (id) => {
