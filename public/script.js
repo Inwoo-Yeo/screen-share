@@ -104,8 +104,10 @@ function joinSession(asHost) {
     myPeerId = id;
     console.log('✅ PeerJS ID:', id);
 
-    socket = io();
-    setupSocketHandlers();
+    // public/script.js 수정
+    socket = io({
+      transports: ['websocket', 'polling'] // 연결 안정성을 위해 추가
+  });
 
     socket.emit('join-session', {
       sessionId,
