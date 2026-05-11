@@ -50,16 +50,16 @@ let myUserName = null;
 let mySessionId = null;
 let isHost = false;
 
-let currentRoom = null;     // 지금 들어가 있는 방 번호
-let sessionState = null;    // 마지막 세션 스냅샷
+let currentRoom = null;
+let sessionState = null;
 
 let screenStream = null;
 let micStream = null;
 
-let activeCalls = {};       // peerId -> 내가 발신 중인 통화
-let incomingCalls = {};     // peerId -> 내가 수신한 통화
-let knownPeers = {};        // 현재 방의 다른 멤버: { peerId: { userName, isHost } }
-let remoteVideos = {};      // 화면에 표시 중인 원격 비디오: { peerId: wrapperDiv }
+let activeCalls = {};
+let incomingCalls = {};
+let knownPeers = {};
+let remoteVideos = {};
 
 // ===== 화면 전환 =====
 function showScreen(name) {
@@ -89,10 +89,6 @@ function joinSession(asHost) {
   myUserName = userName;
   isHost = asHost;
 
-  // PeerJS 연결
-  // public/script.js 수정
-
-// 기존 코드를 지우고 아래 내용으로 교체하세요
   peer = new Peer(undefined, {
     host: location.hostname,
     port: location.protocol === 'https:' ? 443 : (location.port || 80),
@@ -104,17 +100,12 @@ function joinSession(asHost) {
     myPeerId = id;
     console.log('✅ PeerJS ID:', id);
 
-    // public/script.js 수정
     socket = io({
-      transports: ['websocket', 'polling'] // 연결 안정성을 위해 추가
-  });
+      transports: ['websocket', 'polling']
+    });
 
+    setupSocketHandlers();
 
-    setupSocketHandlers(); 
-
-    socket.emit('join-session', {
-  
-    
     socket.emit('join-session', {
       sessionId,
       peerId: myPeerId,
@@ -130,9 +121,7 @@ function joinSession(asHost) {
     alert('연결 오류: ' + (err.type || err.message));
   });
 
-  // 모든 들어오는 통화 처리 (방 안에서만 유효)
   peer.on('call', (call) => {
-    // 현재 같은 방에 있는 멤버에서 온 통화만 응답
     if (!knownPeers[call.peer]) {
       console.log('알 수 없는 피어 통화 무시:', call.peer);
       return;
@@ -157,7 +146,7 @@ function setupSocketHandlers() {
 
   socket.on('session-state', (state) => {
     sessionState = state;
-    if (!meetingScreen.classList.contains('hidden')) return; // 미팅 중이면 다시 그리지 않음
+    if (!meetingScreen.classList.contains('hidden')) return;
     renderRoomGrid();
   });
 
@@ -174,8 +163,6 @@ function setupSocketHandlers() {
     console.log('👤 입장:', userName);
     knownPeers[peerId] = { userName, isHost: theirIsHost };
     updateUserCount();
-
-    // 내가 공유 중이라면 새 멤버에게도 호출
     if (hasOutgoingMedia()) setTimeout(() => callPeer(peerId), 600);
   });
 
@@ -257,38 +244,31 @@ function enterMeetingScreen(roomKey) {
   currentRoomLabel.textContent = `방 ${roomKey}`;
   meetingHostBadge.classList.toggle('hidden', !isHost);
 
-  // 메시지/원격 비디오 초기화 (방마다 깨끗하게)
   messages.innerHTML = '';
   Object.values(remoteVideos).forEach((el) => el.remove());
   remoteVideos = {};
 
-  // 이전 방의 통화 정리
   Object.values(activeCalls).forEach((c) => c.close());
   Object.values(incomingCalls).forEach((c) => c.close());
   activeCalls = {};
   incomingCalls = {};
 
-  // 본인이 공유 중이던 화면은 유지 (호스트가 방 이동해도 공유 지속 가능)
   if (screenStream) showLocalVideo(screenStream);
   else removeLocalVideo();
 
   updateUserCount();
   togglePlaceholder();
 
-  // 공유 중이면 새 방 멤버들에게 다시 호출
   if (hasOutgoingMedia()) setTimeout(() => updateAllCalls(), 500);
 }
 
-// "← 방 목록" 버튼
 backToGridBtn.addEventListener('click', () => {
-  // 통화 정리
   Object.values(activeCalls).forEach((c) => c.close());
   Object.values(incomingCalls).forEach((c) => c.close());
   activeCalls = {};
   incomingCalls = {};
   knownPeers = {};
 
-  // 원격 비디오 정리 (로컬 스트림 자체는 유지)
   Object.values(remoteVideos).forEach((el) => el.remove());
   remoteVideos = {};
   removeLocalVideo();
@@ -299,7 +279,6 @@ backToGridBtn.addEventListener('click', () => {
   renderRoomGrid();
 });
 
-// 세션 자체 종료
 exitSessionBtn.addEventListener('click', confirmExit);
 leaveBtn.addEventListener('click', confirmExit);
 
@@ -308,7 +287,7 @@ function confirmExit() {
 }
 
 function updateUserCount() {
-  userCount.textContent = Object.keys(knownPeers).length + 1; // +1 = 나
+  userCount.textContent = Object.keys(knownPeers).length + 1;
 }
 
 // ===== 화면 공유 =====
@@ -389,6 +368,7 @@ function buildOutgoingStream() {
   if (micStream) micStream.getAudioTracks().forEach((t) => tracks.push(t));
   return tracks.length > 0 ? new MediaStream(tracks) : null;
 }
+
 function hasOutgoingMedia() { return !!(screenStream || micStream); }
 
 async function updateAllCalls() {
