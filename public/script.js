@@ -5,61 +5,61 @@
 const $ = (id) => document.getElementById(id);
 
 // ===== DOM 요소 =====
-const joinScreen = $('join-screen');
-const gridScreen = $('grid-screen');
+const joinScreen    = $('join-screen');
+const gridScreen    = $('grid-screen');
 const meetingScreen = $('meeting-screen');
 
-const sessionIdInput = $('sessionId');
-const userNameInput = $('userName');
-const numRoomsInput = $('numRooms');
-const maxPerRoomInput = $('maxPerRoom');
+const sessionIdInput      = $('sessionId');
+const userNameInput       = $('userName');
+const numRoomsInput       = $('numRooms');
+const maxPerRoomInput     = $('maxPerRoom');
 const joinAsParticipantBtn = $('joinAsParticipantBtn');
-const joinAsHostBtn = $('joinAsHostBtn');
+const joinAsHostBtn       = $('joinAsHostBtn');
 
-const gridTitle = $('gridTitle');
-const hostBadge = $('hostBadge');
-const hostHint = $('hostHint');
+const gridTitle     = $('gridTitle');
+const hostBadge     = $('hostBadge');
+const hostHint      = $('hostHint');
 const gridSessionId = $('gridSessionId');
-const gridUserName = $('gridUserName');
-const roomGrid = $('roomGrid');
+const gridUserName  = $('gridUserName');
+const roomGrid      = $('roomGrid');
 const exitSessionBtn = $('exitSessionBtn');
 
-const backToGridBtn = $('backToGridBtn');
+const backToGridBtn    = $('backToGridBtn');
 const currentRoomLabel = $('currentRoomLabel');
-const userCount = $('userCount');
+const userCount        = $('userCount');
 const meetingHostBadge = $('meetingHostBadge');
-const leaveBtn = $('leaveBtn');
+const leaveBtn         = $('leaveBtn');
 
-const shareBtn = $('shareBtn');
+const shareBtn   = $('shareBtn');
 const shareLabel = $('shareLabel');
-const micBtn = $('micBtn');
-const micIcon = $('micIcon');
-const micLabel = $('micLabel');
+const micBtn     = $('micBtn');
+const micIcon    = $('micIcon');
+const micLabel   = $('micLabel');
 
-const sendBtn = $('sendBtn');
+const sendBtn   = $('sendBtn');
 const chatInput = $('chatInput');
-const messages = $('messages');
-const videosEl = $('videos');
+const messages  = $('messages');
+const videosEl  = $('videos');
 const placeholder = $('placeholder');
 
 // ===== 상태 =====
-let socket = null;
-let peer = null;
-let myPeerId = null;
-let myUserName = null;
+let socket      = null;
+let peer        = null;
+let myPeerId    = null;
+let myUserName  = null;
 let mySessionId = null;
-let isHost = false;
+let isHost      = false;
 
-let currentRoom = null;
+let currentRoom  = null;
 let sessionState = null;
 
 let screenStream = null;
-let micStream = null;
+let micStream    = null;
 
-let activeCalls = {};
-let incomingCalls = {};
-let knownPeers = {};
-let remoteVideos = {};
+let activeCalls  = {};   // peerId → 발신 통화
+let incomingCalls = {};  // peerId → 수신 통화
+let knownPeers   = {};   // 현재 방 멤버
+let remoteVideos = {};   // 화면에 표시 중인 원격 비디오
 
 // ===== 화면 전환 =====
 function showScreen(name) {
@@ -77,8 +77,10 @@ joinAsHostBtn.addEventListener('click', () => joinSession(true));
 );
 
 function joinSession(asHost) {
+  if (peer) return; // 중복 실행 방지
+
   const sessionId = sessionIdInput.value.trim();
-  const userName = userNameInput.value.trim();
+  const userName  = userNameInput.value.trim();
 
   if (!sessionId || !userName) {
     alert('세션 이름과 닉네임을 모두 입력해 주세요.');
@@ -86,32 +88,37 @@ function joinSession(asHost) {
   }
 
   mySessionId = sessionId;
-  myUserName = userName;
-  isHost = asHost;
+  myUserName  = userName;
+  isHost      = asHost;
+
+  // 버튼 비활성화 (중복 클릭 방지)
+  joinAsParticipantBtn.disabled = true;
+  joinAsHostBtn.disabled        = true;
+  joinAsParticipantBtn.textContent = '연결 중...';
+  joinAsHostBtn.textContent        = '연결 중...';
+
+  // 소켓을 peer.on('open') 밖에서 먼저 생성
+  socket = io({ transports: ['websocket', 'polling'] });
+  setupSocketHandlers();
 
   peer = new Peer(undefined, {
-    host: location.hostname,
-    port: location.protocol === 'https:' ? 443 : (location.port || 80),
-    path: '/peerjs',
-    secure: location.protocol === 'https:'
+    host:   location.hostname,
+    port:   location.protocol === 'https:' ? 443 : (location.port || 80),
+    path:   '/peerjs',
+    secure: location.protocol === 'https:',
   });
 
-  peer.on('open', (id) => {
+  // open 이벤트는 단 한 번만 처리
+  peer.once('open', (id) => {
     myPeerId = id;
     console.log('✅ PeerJS ID:', id);
 
-    socket = io({
-      transports: ['websocket', 'polling']
-    });
-
-    setupSocketHandlers();
-
     socket.emit('join-session', {
       sessionId,
-      peerId: myPeerId,
+      peerId:     myPeerId,
       userName,
-      isHost: asHost,
-      numRooms: asHost ? parseInt(numRoomsInput.value, 10) || 9 : undefined,
+      isHost:     asHost,
+      numRooms:   asHost ? parseInt(numRoomsInput.value, 10)  || 9 : undefined,
       maxPerRoom: asHost ? parseInt(maxPerRoomInput.value, 10) || 4 : undefined,
     });
   });
@@ -119,8 +126,16 @@ function joinSession(asHost) {
   peer.on('error', (err) => {
     console.error('PeerJS 오류:', err);
     alert('연결 오류: ' + (err.type || err.message));
+    // 오류 시 상태 초기화 및 버튼 복구
+    peer   = null;
+    socket = null;
+    joinAsParticipantBtn.disabled    = false;
+    joinAsHostBtn.disabled           = false;
+    joinAsParticipantBtn.textContent = '참가자로 입장';
+    joinAsHostBtn.textContent        = '호스트로 입장';
   });
 
+  // 들어오는 통화 처리 (같은 방 멤버만)
   peer.on('call', (call) => {
     if (!knownPeers[call.peer]) {
       console.log('알 수 없는 피어 통화 무시:', call.peer);
@@ -152,8 +167,10 @@ function setupSocketHandlers() {
 
   socket.on('room-joined', ({ roomKey, existing }) => {
     currentRoom = roomKey;
-    knownPeers = {};
-    existing.forEach((u) => { knownPeers[u.peerId] = { userName: u.userName, isHost: u.isHost }; });
+    knownPeers  = {};
+    existing.forEach((u) => {
+      knownPeers[u.peerId] = { userName: u.userName, isHost: u.isHost };
+    });
     enterMeetingScreen(roomKey);
   });
 
@@ -170,12 +187,14 @@ function setupSocketHandlers() {
     console.log('👋 퇴장:', peerId);
     delete knownPeers[peerId];
     removeRemoteVideo(peerId);
-    if (activeCalls[peerId]) { activeCalls[peerId].close(); delete activeCalls[peerId]; }
+    if (activeCalls[peerId]) {
+      activeCalls[peerId].close();
+      delete activeCalls[peerId];
+    }
     updateUserCount();
   });
 
   socket.on('chat-message', addChatMessage);
-
   socket.on('error-msg', (msg) => alert(msg));
 }
 
@@ -183,7 +202,7 @@ function setupSocketHandlers() {
 function enterGridScreen() {
   showScreen('grid');
   gridSessionId.textContent = mySessionId;
-  gridUserName.textContent = myUserName;
+  gridUserName.textContent  = myUserName;
 
   if (isHost) {
     gridTitle.textContent = '방 대시보드';
@@ -199,13 +218,16 @@ function renderRoomGrid() {
   if (!sessionState) return;
   roomGrid.innerHTML = '';
 
-  const sortedRooms = Object.values(sessionState.rooms).sort((a, b) => a.roomNumber - b.roomNumber);
+  const sortedRooms = Object.values(sessionState.rooms)
+    .sort((a, b) => a.roomNumber - b.roomNumber);
 
   sortedRooms.forEach((room) => {
     const isFull = room.isFull;
-    const card = document.createElement('div');
+    const card   = document.createElement('div');
     card.className =
-      `bg-gray-800 rounded-lg p-4 border-2 ${isFull ? 'border-red-700/60' : 'border-gray-700 hover:border-blue-500'} transition`;
+      `bg-gray-800 rounded-lg p-4 border-2 ${isFull
+        ? 'border-red-700/60'
+        : 'border-gray-700 hover:border-blue-500'} transition`;
 
     const memberHtml = room.members.length > 0
       ? room.members
@@ -223,7 +245,9 @@ function renderRoomGrid() {
       <ul class="text-sm text-gray-300 mb-3 space-y-1 min-h-[3rem]">${memberHtml}</ul>
       <button data-room="${room.roomNumber}"
         class="w-full py-2 rounded font-semibold text-sm transition
-        ${isFull ? 'bg-gray-700 text-gray-500 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500 text-white'}"
+        ${isFull
+          ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+          : 'bg-blue-600 hover:bg-blue-500 text-white'}"
         ${isFull ? 'disabled' : ''}>
         ${isFull ? '꽉 참' : '입장'}
       </button>
@@ -244,13 +268,15 @@ function enterMeetingScreen(roomKey) {
   currentRoomLabel.textContent = `방 ${roomKey}`;
   meetingHostBadge.classList.toggle('hidden', !isHost);
 
+  // 채팅·비디오 초기화
   messages.innerHTML = '';
   Object.values(remoteVideos).forEach((el) => el.remove());
   remoteVideos = {};
 
+  // 이전 방 통화 정리
   Object.values(activeCalls).forEach((c) => c.close());
   Object.values(incomingCalls).forEach((c) => c.close());
-  activeCalls = {};
+  activeCalls   = {};
   incomingCalls = {};
 
   if (screenStream) showLocalVideo(screenStream);
@@ -262,12 +288,13 @@ function enterMeetingScreen(roomKey) {
   if (hasOutgoingMedia()) setTimeout(() => updateAllCalls(), 500);
 }
 
+// "← 방 목록" 버튼
 backToGridBtn.addEventListener('click', () => {
   Object.values(activeCalls).forEach((c) => c.close());
   Object.values(incomingCalls).forEach((c) => c.close());
-  activeCalls = {};
+  activeCalls   = {};
   incomingCalls = {};
-  knownPeers = {};
+  knownPeers    = {};
 
   Object.values(remoteVideos).forEach((el) => el.remove());
   remoteVideos = {};
@@ -287,11 +314,12 @@ function confirmExit() {
 }
 
 function updateUserCount() {
-  userCount.textContent = Object.keys(knownPeers).length + 1;
+  userCount.textContent = Object.keys(knownPeers).length + 1; // +1 = 나
 }
 
 // ===== 화면 공유 =====
 shareBtn.addEventListener('click', toggleScreenShare);
+
 async function toggleScreenShare() {
   if (screenStream) stopScreenShare();
   else await startScreenShare();
@@ -333,11 +361,12 @@ function stopScreenShare() {
 
 // ===== 마이크 =====
 micBtn.addEventListener('click', toggleMic);
+
 async function toggleMic() {
   if (micStream) {
     micStream.getTracks().forEach((t) => t.stop());
     micStream = null;
-    micIcon.textContent = '🎤';
+    micIcon.textContent  = '🎤';
     micLabel.textContent = '마이크 켜기';
     micBtn.classList.remove('bg-green-600', 'hover:bg-green-500');
     micBtn.classList.add('bg-gray-700', 'hover:bg-gray-600');
@@ -346,7 +375,7 @@ async function toggleMic() {
       micStream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true },
       });
-      micIcon.textContent = '🔴';
+      micIcon.textContent  = '🔴';
       micLabel.textContent = '마이크 끄기';
       micBtn.classList.remove('bg-gray-700', 'hover:bg-gray-600');
       micBtn.classList.add('bg-green-600', 'hover:bg-green-500');
@@ -369,7 +398,9 @@ function buildOutgoingStream() {
   return tracks.length > 0 ? new MediaStream(tracks) : null;
 }
 
-function hasOutgoingMedia() { return !!(screenStream || micStream); }
+function hasOutgoingMedia() {
+  return !!(screenStream || micStream);
+}
 
 async function updateAllCalls() {
   Object.values(activeCalls).forEach((c) => c.close());
@@ -392,18 +423,18 @@ function callPeer(peerId) {
 function showLocalVideo(stream) {
   removeLocalVideo();
   const wrapper = document.createElement('div');
-  wrapper.id = 'local-video-wrapper';
+  wrapper.id        = 'local-video-wrapper';
   wrapper.className = 'relative bg-black rounded-lg overflow-hidden aspect-video';
 
   const video = document.createElement('video');
-  video.srcObject = stream;
-  video.autoplay = true;
-  video.muted = true;
+  video.srcObject  = stream;
+  video.autoplay   = true;
+  video.muted      = true;
   video.playsInline = true;
-  video.className = 'w-full h-full object-contain';
+  video.className  = 'w-full h-full object-contain';
 
   const label = document.createElement('div');
-  label.className = 'absolute top-2 left-2 bg-black/70 px-2 py-1 rounded text-xs';
+  label.className  = 'absolute top-2 left-2 bg-black/70 px-2 py-1 rounded text-xs';
   label.textContent = `🟢 ${myUserName} (나)${isHost ? ' 👑' : ''}`;
 
   wrapper.appendChild(video);
@@ -424,17 +455,17 @@ function showRemoteVideo(peerId, stream) {
     return;
   }
   const peerInfo = knownPeers[peerId];
-  const wrapper = document.createElement('div');
+  const wrapper  = document.createElement('div');
   wrapper.className = 'relative bg-black rounded-lg overflow-hidden aspect-video';
 
   const video = document.createElement('video');
-  video.srcObject = stream;
-  video.autoplay = true;
+  video.srcObject  = stream;
+  video.autoplay   = true;
   video.playsInline = true;
-  video.className = 'w-full h-full object-contain';
+  video.className  = 'w-full h-full object-contain';
 
   const label = document.createElement('div');
-  label.className = 'absolute top-2 left-2 bg-black/70 px-2 py-1 rounded text-xs';
+  label.className  = 'absolute top-2 left-2 bg-black/70 px-2 py-1 rounded text-xs';
   label.textContent = `🔵 ${peerInfo?.userName || '?'}${peerInfo?.isHost ? ' 👑' : ''}`;
 
   wrapper.appendChild(video);
@@ -472,13 +503,13 @@ function addChatMessage({ user, isHost: msgIsHost, message, time, system }) {
   const div = document.createElement('div');
 
   if (system) {
-    div.className = 'text-center text-xs text-gray-500 italic';
+    div.className   = 'text-center text-xs text-gray-500 italic';
     div.textContent = message;
   } else {
-    const isMe = user === myUserName;
+    const isMe        = user === myUserName;
     const displayName = `${user}${msgIsHost ? ' 👑' : ''}`;
-    div.className = `flex flex-col ${isMe ? 'items-end' : 'items-start'}`;
-    div.innerHTML = `
+    div.className     = `flex flex-col ${isMe ? 'items-end' : 'items-start'}`;
+    div.innerHTML     = `
       <div class="text-xs text-gray-400 mb-1">
         ${escapeHtml(displayName)} <span class="text-gray-500">${time}</span>
       </div>
@@ -493,7 +524,7 @@ function addChatMessage({ user, isHost: msgIsHost, message, time, system }) {
 }
 
 function escapeHtml(str) {
-  const div = document.createElement('div');
+  const div       = document.createElement('div');
   div.textContent = str;
   return div.innerHTML;
 }
