@@ -3,14 +3,25 @@
 // 세션(Session) > 방(Room) 구조로 호스트 모니터링 기능 지원
 
 const express = require('express');
-const http = require('http');
-const path = require('path');
-const { Server } = require('socket.io');
+const http    = require('http');
+const path    = require('path');
+const { Server }           = require('socket.io');
 const { ExpressPeerServer } = require('peer');
 
-const app = express();
+const app    = express();
 const server = http.createServer(app);
-const io = new Server(server);
+
+// ---------- Socket.IO (Render 프록시 환경 대응) ----------
+const io = new Server(server, {
+  cors: {
+    origin:  '*',
+    methods: ['GET', 'POST'],
+  },
+  transports:  ['polling', 'websocket'], // polling 먼저 → 안정적 연결 후 WebSocket 업그레이드
+  allowEIO3:   true,
+  pingTimeout:  60000,
+  pingInterval: 25000,
+});
 
 // ---------- PeerJS 서버 ----------
 const peerServer = ExpressPeerServer(server, {
@@ -21,20 +32,20 @@ app.use('/peerjs', peerServer);
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ---------- 기본 설정 ----------
-const DEFAULT_NUM_ROOMS = 9;
-const DEFAULT_MAX_PER_ROOM = 4; // 호스트도 포함됨 (3명 + 호스트 1)
+const DEFAULT_NUM_ROOMS   = 9;
+const DEFAULT_MAX_PER_ROOM = 4;
 
 // ---------- 세션 메모리 저장소 ----------
 // sessions[sessionId] = {
 //   hostPeerId, numRooms, maxPerRoom,
-//   rooms: { 1: [{peerId, userName, socketId, isHost}], 2: [...], ... }
+//   rooms: { 1: [{peerId, userName, socketId, isHost}], ... }
 // }
 const sessions = {};
 
 function getOrCreateSession(sessionId, numRooms, maxPerRoom) {
   if (!sessions[sessionId]) {
-    const n = Math.max(1, Math.min(20, parseInt(numRooms) || DEFAULT_NUM_ROOMS));
-    const m = Math.max(2, Math.min(10, parseInt(maxPerRoom) || DEFAULT_MAX_PER_ROOM));
+    const n = Math.max(1,  Math.min(20, parseInt(numRooms)    || DEFAULT_NUM_ROOMS));
+    const m = Math.max(2,  Math.min(10, parseInt(maxPerRoom)  || DEFAULT_MAX_PER_ROOM));
     sessions[sessionId] = { hostPeerId: null, numRooms: n, maxPerRoom: m, rooms: {} };
     for (let i = 1; i <= n; i++) sessions[sessionId].rooms[i] = [];
     console.log(`✨ 세션 [${sessionId}] 생성 (방 ${n}개, 최대 ${m}명/방)`);
@@ -49,19 +60,19 @@ function snapshotSession(sessionId) {
   for (const [k, members] of Object.entries(s.rooms)) {
     rooms[k] = {
       roomNumber: Number(k),
-      members: members.map((m) => ({
-        peerId: m.peerId,
+      members:    members.map((m) => ({
+        peerId:   m.peerId,
         userName: m.userName,
-        isHost: m.peerId === s.hostPeerId,
+        isHost:   m.peerId === s.hostPeerId,
       })),
-      isFull: members.length >= s.maxPerRoom,
+      isFull:   members.length >= s.maxPerRoom,
       capacity: s.maxPerRoom,
     };
   }
   return {
     sessionId,
     hostPeerId: s.hostPeerId,
-    numRooms: s.numRooms,
+    numRooms:   s.numRooms,
     maxPerRoom: s.maxPerRoom,
     rooms,
   };
@@ -91,10 +102,10 @@ function leaveCurrentRoom(socket) {
 
   socket.to(roomChannel).emit('user-disconnected', d.peerId);
   io.to(roomChannel).emit('chat-message', {
-    user: '시스템',
+    user:    '시스템',
     message: `${d.userName}님이 방을 나갔습니다.`,
-    time: new Date().toLocaleTimeString('ko-KR'),
-    system: true,
+    time:    new Date().toLocaleTimeString('ko-KR'),
+    system:  true,
   });
 
   d.roomKey = null;
@@ -104,7 +115,7 @@ function leaveCurrentRoom(socket) {
 io.on('connection', (socket) => {
   console.log('🔌 Socket 연결:', socket.id);
 
-  // 1단계: 세션 입장 (아직 방 선택 전)
+  // 1단계: 세션 입장
   socket.on('join-session', ({ sessionId, peerId, userName, isHost, numRooms, maxPerRoom }) => {
     if (!sessionId || !peerId || !userName) {
       return socket.emit('error-msg', '세션/닉네임 정보가 부족합니다.');
@@ -141,38 +152,37 @@ io.on('connection', (socket) => {
       return socket.emit('room-error', '방이 꽉 찼습니다.');
     }
 
-    // 이전 방이 있다면 먼저 나가기
     if (d.roomKey) leaveCurrentRoom(socket);
 
     const roomChannel = `room:${d.sessionId}:${roomKey}`;
     socket.join(roomChannel);
 
     const existing = room.map((m) => ({
-      peerId: m.peerId,
+      peerId:   m.peerId,
       userName: m.userName,
-      isHost: m.peerId === s.hostPeerId,
+      isHost:   m.peerId === s.hostPeerId,
     }));
     socket.emit('room-joined', { roomKey, existing });
 
     socket.to(roomChannel).emit('user-connected', {
-      peerId: d.peerId,
+      peerId:   d.peerId,
       userName: d.userName,
-      isHost: d.isHost,
+      isHost:   d.isHost,
     });
 
     room.push({
-      peerId: d.peerId,
+      peerId:   d.peerId,
       userName: d.userName,
       socketId: socket.id,
-      isHost: d.isHost,
+      isHost:   d.isHost,
     });
     d.roomKey = roomKey;
 
     io.to(roomChannel).emit('chat-message', {
-      user: '시스템',
+      user:    '시스템',
       message: `${d.userName}${d.isHost ? '(👑호스트)' : ''}님이 입장했습니다.`,
-      time: new Date().toLocaleTimeString('ko-KR'),
-      system: true,
+      time:    new Date().toLocaleTimeString('ko-KR'),
+      system:  true,
     });
 
     broadcastSession(d.sessionId);
@@ -185,16 +195,16 @@ io.on('connection', (socket) => {
     if (d?.sessionId) broadcastSession(d.sessionId);
   });
 
-  // 채팅 (현재 들어있는 방에만 전송)
+  // 채팅
   socket.on('chat-message', (message) => {
     const d = socket.data;
     if (!d?.roomKey) return;
     const roomChannel = `room:${d.sessionId}:${d.roomKey}`;
     io.to(roomChannel).emit('chat-message', {
-      user: d.userName,
-      isHost: d.isHost,
+      user:    d.userName,
+      isHost:  d.isHost,
       message,
-      time: new Date().toLocaleTimeString('ko-KR'),
+      time:    new Date().toLocaleTimeString('ko-KR'),
     });
   });
 
