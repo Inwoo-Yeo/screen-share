@@ -9,19 +9,19 @@ const joinScreen    = $('join-screen');
 const gridScreen    = $('grid-screen');
 const meetingScreen = $('meeting-screen');
 
-const sessionIdInput      = $('sessionId');
-const userNameInput       = $('userName');
-const numRoomsInput       = $('numRooms');
-const maxPerRoomInput     = $('maxPerRoom');
+const sessionIdInput       = $('sessionId');
+const userNameInput        = $('userName');
+const numRoomsInput        = $('numRooms');
+const maxPerRoomInput      = $('maxPerRoom');
 const joinAsParticipantBtn = $('joinAsParticipantBtn');
-const joinAsHostBtn       = $('joinAsHostBtn');
+const joinAsHostBtn        = $('joinAsHostBtn');
 
-const gridTitle     = $('gridTitle');
-const hostBadge     = $('hostBadge');
-const hostHint      = $('hostHint');
-const gridSessionId = $('gridSessionId');
-const gridUserName  = $('gridUserName');
-const roomGrid      = $('roomGrid');
+const gridTitle      = $('gridTitle');
+const hostBadge      = $('hostBadge');
+const hostHint       = $('hostHint');
+const gridSessionId  = $('gridSessionId');
+const gridUserName   = $('gridUserName');
+const roomGrid       = $('roomGrid');
 const exitSessionBtn = $('exitSessionBtn');
 
 const backToGridBtn    = $('backToGridBtn');
@@ -36,10 +36,10 @@ const micBtn     = $('micBtn');
 const micIcon    = $('micIcon');
 const micLabel   = $('micLabel');
 
-const sendBtn   = $('sendBtn');
-const chatInput = $('chatInput');
-const messages  = $('messages');
-const videosEl  = $('videos');
+const sendBtn     = $('sendBtn');
+const chatInput   = $('chatInput');
+const messages    = $('messages');
+const videosEl    = $('videos');
 const placeholder = $('placeholder');
 
 // ===== 상태 =====
@@ -56,10 +56,10 @@ let sessionState = null;
 let screenStream = null;
 let micStream    = null;
 
-let activeCalls  = {};   // peerId → 발신 통화
-let incomingCalls = {};  // peerId → 수신 통화
-let knownPeers   = {};   // 현재 방 멤버
-let remoteVideos = {};   // 화면에 표시 중인 원격 비디오
+let activeCalls   = {};
+let incomingCalls = {};
+let knownPeers    = {};
+let remoteVideos  = {};
 
 // ===== 화면 전환 =====
 function showScreen(name) {
@@ -91,21 +91,28 @@ function joinSession(asHost) {
   myUserName  = userName;
   isHost      = asHost;
 
-  // 버튼 비활성화 (중복 클릭 방지)
-  joinAsParticipantBtn.disabled = true;
-  joinAsHostBtn.disabled        = true;
+  // 버튼 비활성화
+  joinAsParticipantBtn.disabled    = true;
+  joinAsHostBtn.disabled           = true;
   joinAsParticipantBtn.textContent = '연결 중...';
   joinAsHostBtn.textContent        = '연결 중...';
 
-  // 소켓을 peer.on('open') 밖에서 먼저 생성
-  socket = io({ transports: ['websocket', 'polling'] });
+  // ── Socket.IO 먼저 연결 ──
+  // Render(역방향 프록시) 환경: polling 먼저 시도 후 WebSocket 업그레이드
+  socket = io({
+    transports:       ['polling', 'websocket'],
+    reconnectionDelay: 1000,
+    timeout:           20000,
+  });
   setupSocketHandlers();
 
+  // ── PeerJS 연결 ──
+  // Render에서는 항상 443 포트 / secure: true
   peer = new Peer(undefined, {
     host:   location.hostname,
-    port:   location.protocol === 'https:' ? 443 : (location.port || 80),
+    port:   443,
     path:   '/peerjs',
-    secure: location.protocol === 'https:',
+    secure: true,
   });
 
   // open 이벤트는 단 한 번만 처리
@@ -126,7 +133,6 @@ function joinSession(asHost) {
   peer.on('error', (err) => {
     console.error('PeerJS 오류:', err);
     alert('연결 오류: ' + (err.type || err.message));
-    // 오류 시 상태 초기화 및 버튼 복구
     peer   = null;
     socket = null;
     joinAsParticipantBtn.disabled    = false;
@@ -154,7 +160,20 @@ function joinSession(asHost) {
 
 // ===== Socket 이벤트 =====
 function setupSocketHandlers() {
+  socket.on('connect', () => {
+    console.log('🟢 Socket 연결됨:', socket.id);
+  });
+
+  socket.on('disconnect', (reason) => {
+    console.log('🔴 Socket 끊김:', reason);
+  });
+
+  socket.on('connect_error', (err) => {
+    console.error('❌ Socket 연결 오류:', err.message);
+  });
+
   socket.on('session-joined', (state) => {
+    console.log('✅ session-joined 수신');
     sessionState = state;
     enterGridScreen();
   });
@@ -268,12 +287,10 @@ function enterMeetingScreen(roomKey) {
   currentRoomLabel.textContent = `방 ${roomKey}`;
   meetingHostBadge.classList.toggle('hidden', !isHost);
 
-  // 채팅·비디오 초기화
   messages.innerHTML = '';
   Object.values(remoteVideos).forEach((el) => el.remove());
   remoteVideos = {};
 
-  // 이전 방 통화 정리
   Object.values(activeCalls).forEach((c) => c.close());
   Object.values(incomingCalls).forEach((c) => c.close());
   activeCalls   = {};
@@ -314,7 +331,7 @@ function confirmExit() {
 }
 
 function updateUserCount() {
-  userCount.textContent = Object.keys(knownPeers).length + 1; // +1 = 나
+  userCount.textContent = Object.keys(knownPeers).length + 1;
 }
 
 // ===== 화면 공유 =====
@@ -427,14 +444,14 @@ function showLocalVideo(stream) {
   wrapper.className = 'relative bg-black rounded-lg overflow-hidden aspect-video';
 
   const video = document.createElement('video');
-  video.srcObject  = stream;
-  video.autoplay   = true;
-  video.muted      = true;
+  video.srcObject   = stream;
+  video.autoplay    = true;
+  video.muted       = true;
   video.playsInline = true;
-  video.className  = 'w-full h-full object-contain';
+  video.className   = 'w-full h-full object-contain';
 
   const label = document.createElement('div');
-  label.className  = 'absolute top-2 left-2 bg-black/70 px-2 py-1 rounded text-xs';
+  label.className   = 'absolute top-2 left-2 bg-black/70 px-2 py-1 rounded text-xs';
   label.textContent = `🟢 ${myUserName} (나)${isHost ? ' 👑' : ''}`;
 
   wrapper.appendChild(video);
@@ -459,13 +476,13 @@ function showRemoteVideo(peerId, stream) {
   wrapper.className = 'relative bg-black rounded-lg overflow-hidden aspect-video';
 
   const video = document.createElement('video');
-  video.srcObject  = stream;
-  video.autoplay   = true;
+  video.srcObject   = stream;
+  video.autoplay    = true;
   video.playsInline = true;
-  video.className  = 'w-full h-full object-contain';
+  video.className   = 'w-full h-full object-contain';
 
   const label = document.createElement('div');
-  label.className  = 'absolute top-2 left-2 bg-black/70 px-2 py-1 rounded text-xs';
+  label.className   = 'absolute top-2 left-2 bg-black/70 px-2 py-1 rounded text-xs';
   label.textContent = `🔵 ${peerInfo?.userName || '?'}${peerInfo?.isHost ? ' 👑' : ''}`;
 
   wrapper.appendChild(video);
